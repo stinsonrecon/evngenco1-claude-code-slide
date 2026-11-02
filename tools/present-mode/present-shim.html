@@ -1,0 +1,172 @@
+
+<!-- ak:present-mode -->
+<script>
+/* Fullscreen presentation mode for a copy of this deck opened from disk.
+ *
+ * The deck-stage engine already implements a presenting mode: it hides the
+ * thumbnail rail, refits the slide to the whole viewport and stops flashing
+ * its toolbar at the audience. It only enters that mode when the claude.ai
+ * host posts __omelette_presenting, so a downloaded copy has no way in and
+ * no way to fill the screen. This wires the same message to the Fullscreen
+ * API, to a button in the deck's own toolbar, and to the F / F5 keys.
+ */
+(function () {
+  'use strict';
+
+  var ICON_ENTER = '<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6 2.5H2.5V6M10 2.5h3.5V6M6 13.5H2.5V10M10 13.5h3.5V10"/></svg>';
+  var ICON_EXIT = '<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M2.5 6H6V2.5M13.5 6H10V2.5M2.5 10H6v3.5M13.5 10H10v3.5"/></svg>';
+
+  var CSS = [
+    '.ak-present{font-size:11px;font-weight:500;letter-spacing:.02em;padding:0 8px 0 10px;gap:6px;color:rgba(255,255,255,0.72)}',
+    '.ak-present svg{width:13px;height:13px}',
+    '.ak-present .ak-kbd{display:inline-flex;align-items:center;justify-content:center;min-width:16px;height:16px;padding:0 4px;font-family:ui-monospace,"SF Mono",Menlo,Consolas,monospace;font-size:10px;line-height:1;color:rgba(255,255,255,0.88);background:rgba(255,255,255,0.12);border-radius:4px}',
+    '.ak-hint{position:fixed;top:18px;right:18px;z-index:2147483001;display:flex;align-items:center;gap:2px;padding:7px 13px;border-radius:999px;background:rgba(0,0,0,0.82);color:rgba(255,255,255,0.82);font-size:12px;letter-spacing:.01em;opacity:0;transform:translateY(-6px);transition:opacity 320ms ease,transform 320ms cubic-bezier(.2,.8,.2,1);pointer-events:none;user-select:none}',
+    '.ak-hint[data-visible]{opacity:1;transform:none}',
+    '.ak-hint b{display:inline-flex;align-items:center;justify-content:center;min-width:16px;height:16px;padding:0 4px;margin:0 3px;font-family:ui-monospace,"SF Mono",Menlo,Consolas,monospace;font-size:10px;font-weight:500;color:rgba(255,255,255,0.9);background:rgba(255,255,255,0.14);border-radius:4px}',
+    '@media print{.ak-hint{display:none!important}}'
+  ].join('\n');
+
+  var presenting = false;
+  var btn = null;
+  var hint = null;
+
+  function fsEl() {
+    return document.fullscreenElement || document.webkitFullscreenElement || null;
+  }
+
+  function enterFs() {
+    var el = document.documentElement;
+    var req = el.requestFullscreen || el.webkitRequestFullscreen;
+    if (!req) return Promise.reject();
+    try { return Promise.resolve(req.call(el)); } catch (e) { return Promise.reject(e); }
+  }
+
+  function leaveFs() {
+    var ex = document.exitFullscreen || document.webkitExitFullscreen;
+    if (ex) { try { ex.call(document); } catch (e) {} }
+  }
+
+  function setPresenting(on) {
+    if (on === presenting) return;
+    presenting = on;
+    if (on) {
+      document.documentElement.setAttribute('data-presenting', '');
+      dismissHint();
+    } else {
+      document.documentElement.removeAttribute('data-presenting');
+    }
+    /* deck-stage listens for this on window: it hides the rail, closes its
+       menus and refits the slide to the full viewport. */
+    window.postMessage({ __omelette_presenting: on }, '*');
+    syncBtn();
+  }
+
+  function toggle() {
+    if (presenting) {
+      setPresenting(false);
+      if (fsEl()) leaveFs();
+      return;
+    }
+    /* Presenting mode goes on first and fullscreen is the bonus, never the
+       gate. Where the API is missing, refused or simply never settles — iOS
+       Safari, a frame without allowfullscreen, a request made outside a user
+       gesture — hiding the rail and the chrome and filling the tab is still
+       the whole point, and waiting on the promise would forfeit it. */
+    setPresenting(true);
+    enterFs().catch(function () {});
+  }
+
+  function syncBtn() {
+    if (!btn) return;
+    btn.innerHTML = (presenting ? ICON_EXIT : ICON_ENTER) +
+      '<span>' + (presenting ? 'Thoát' : 'Trình chiếu') + '</span>' +
+      '<span class="ak-kbd">' + (presenting ? 'Esc' : 'F') + '</span>';
+    btn.setAttribute('aria-label', presenting ? 'Thoát trình chiếu' : 'Trình chiếu toàn màn hình');
+    btn.setAttribute('title', presenting ? 'Thoát trình chiếu (Esc)' : 'Trình chiếu toàn màn hình (F)');
+    btn.setAttribute('aria-pressed', presenting ? 'true' : 'false');
+  }
+
+  function dismissHint() {
+    if (hint) hint.removeAttribute('data-visible');
+  }
+
+  function mount() {
+    var deck = document.querySelector('deck-stage');
+    if (!deck || !deck.shadowRoot) return false;
+    var root = deck.shadowRoot;
+    var overlay = root.querySelector('.overlay');
+    if (!overlay) return false;
+
+    if (!root.querySelector('style[data-ak-present]')) {
+      var st = document.createElement('style');
+      st.setAttribute('data-ak-present', '');
+      st.textContent = CSS;
+      root.appendChild(st);
+    }
+
+    if (!overlay.querySelector('.ak-present')) {
+      var sep = document.createElement('span');
+      sep.className = 'divider';
+      btn = document.createElement('button');
+      btn.type = 'button';
+      btn.className = 'btn ak-present';
+      /* The engine advances the deck on stage taps; it skips interactive
+         elements, and stopPropagation keeps this out of its document-level
+         click handler as well. */
+      btn.addEventListener('click', function (e) { e.stopPropagation(); toggle(); });
+      overlay.appendChild(sep);
+      overlay.appendChild(btn);
+      syncBtn();
+    }
+
+    if (!root.querySelector('.ak-hint') && !presenting) {
+      hint = document.createElement('div');
+      hint.className = 'ak-hint';
+      hint.setAttribute('data-omelette-chrome', '');
+      hint.innerHTML = 'Nhấn <b>F</b> để trình chiếu toàn màn hình';
+      root.appendChild(hint);
+      /* Read a layout property to resolve the inserted element's style, so
+         the opacity transition actually runs. rAF would do it too, but it is
+         suspended in a background tab: the dismiss timer would then fire
+         before the frame that reveals the hint, leaving it up for good. */
+      void hint.offsetWidth;
+      hint.setAttribute('data-visible', '');
+      setTimeout(dismissHint, 7000);
+    }
+    return true;
+  }
+
+  var started = Date.now();
+  (function wait() {
+    if (mount()) return;
+    if (Date.now() - started > 30000) return;   /* give up rather than spin */
+    setTimeout(wait, 150);
+  })();
+
+  /* slidechange bubbles and composes out of the shadow root, so it is a free
+     signal to re-check the button survived a re-render of the deck element. */
+  document.addEventListener('slidechange', function () { mount(); });
+
+  document.addEventListener('fullscreenchange', function () { setPresenting(!!fsEl()); });
+  document.addEventListener('webkitfullscreenchange', function () { setPresenting(!!fsEl()); });
+
+  window.addEventListener('keydown', function (e) {
+    /* composedPath()[0], not e.target: a window-level keydown retargets to
+       the shadow host and would miss an input inside a slide. */
+    var t = (e.composedPath ? e.composedPath()[0] : e.target);
+    if (t && (t.isContentEditable || /^(INPUT|TEXTAREA|SELECT)$/.test(t.tagName))) return;
+
+    if (e.key === 'F5') { e.preventDefault(); toggle(); return; }
+    if ((e.key === 'f' || e.key === 'F') && !e.metaKey && !e.ctrlKey && !e.altKey) {
+      e.preventDefault(); toggle(); return;
+    }
+    if (e.key === 'Escape' && presenting && !fsEl()) {
+      /* Real fullscreen has its own Escape; this covers the fallback above.
+         Deferred so defaultPrevented reflects deck-stage's own Escape
+         handling — closing a menu, a dialog or a selection — whichever of
+         the two window listeners ran first. */
+      setTimeout(function () { if (!e.defaultPrevented) setPresenting(false); }, 0);
+    }
+  });
+})();
+</script>

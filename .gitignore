@@ -1,0 +1,16 @@
+# Agent tooling directories
+.agentkit/
+.agents/
+.claude/
+.codex/
+.cursor/
+.dsh/
+.grok/
+.omp/
+
+# Agent working notes
+plans/
+AGENTS.md
+
+# macOS
+.DS_Store
